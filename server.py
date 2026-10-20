@@ -60,13 +60,13 @@ def new_state():
 
 def validate(m):
     """Sensors are untrusted input: check every field before it touches the state."""
-    r = {"station": m.get("station"), "name": m.get("name"), "seq": m.get("seq"), "ts": m.get("ts")}
+    r = {"station": m.get("station"), "name": m.get("name"), "boot": m.get("boot"), "seq": m.get("seq"), "ts": m.get("ts")}
     if not (isinstance(r["station"], str) and 0 < len(r["station"]) <= 32):
         raise ValueError("bad station id")
     if not (isinstance(r["name"], str) and 0 < len(r["name"]) <= 40):
         raise ValueError("bad station name")
-    if not all(isinstance(r[k], int) and r[k] >= 0 for k in ("seq", "ts")):
-        raise ValueError("bad seq/ts")
+    if not all(isinstance(r[k], int) and r[k] >= 0 for k in ("boot", "seq", "ts")):
+        raise ValueError("bad boot/seq/ts")
     for p in BREAKPOINTS:
         v = m.get(p)
         if not (isinstance(v, (int, float)) and math.isfinite(v) and 0 <= v <= 2000):
@@ -81,11 +81,14 @@ def add_alert(state, ts, now, station, aqi_value, level, msg):
 
 
 def ingest(state, r, now):
-    """Apply one validated reading. Returns False for a duplicate (a sensor re-sending after failover)."""
+    """Apply one validated reading. Returns False for a duplicate (a sensor re-sending after failover).
+
+    Readings are ordered by (boot, seq): seq restarts at 1 when a sensor reboots, boot does not go back.
+    """
     sid = r["station"]
-    if r["seq"] <= state["last_seq"].get(sid, 0):
+    if (r["boot"], r["seq"]) <= tuple(state["last_seq"].get(sid, (0, 0))):
         return False
-    state["last_seq"][sid] = r["seq"]
+    state["last_seq"][sid] = [r["boot"], r["seq"]]
     st = state["stations"].setdefault(sid, {"name": r["name"], "history": [], "alerting": False, "offline": False})
     a = aqi(r)
     st.update(pm25=r["pm25"], pm10=r["pm10"], no2=r["no2"], aqi=a, category=category(a), seen=now, lamport=r["ts"])

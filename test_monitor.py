@@ -15,8 +15,8 @@ import server
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def reading(seq, pm25=20.0, station="kothrud", ts=None):
-    return {"type": "reading", "station": station, "name": "Kothrud", "seq": seq, "ts": ts or seq,
+def reading(seq, pm25=20.0, station="kothrud", ts=None, boot=1):
+    return {"type": "reading", "station": station, "name": "Kothrud", "boot": boot, "seq": seq, "ts": ts or seq,
             "pm25": pm25, "pm10": 10.0, "no2": 10.0}
 
 
@@ -37,6 +37,13 @@ class RulesTest(unittest.TestCase):
         self.assertFalse(server.ingest(st, server.validate(reading(2)), 0))  # re-sent after failover
         self.assertFalse(server.ingest(st, server.validate(reading(1)), 0))
         self.assertEqual(st["readings"], 2)
+
+    def test_rebooted_sensor_not_mistaken_for_duplicate(self):
+        st = server.new_state()
+        for seq in (1, 2, 3):
+            server.ingest(st, server.validate(reading(seq)), 0)
+        self.assertTrue(server.ingest(st, server.validate(reading(1, boot=2)), 0))  # seq restarts after reboot
+        self.assertFalse(server.ingest(st, server.validate(reading(3, boot=1)), 0))  # old run's re-send still dropped
 
     def test_alert_raised_once_then_cleared(self):
         st = server.new_state()

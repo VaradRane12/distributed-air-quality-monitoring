@@ -10,7 +10,17 @@ alert is missed. A public health warning system should not go silent because one
 Mini project for *Distributed Computing System Laboratory* (BIT27PC04), B.Tech IT, PCCoE Pune.
 Syllabus mini-project #9: *IoT-Based Distributed Sensor Monitoring System*.
 
+![Live dashboard](docs/screenshots/01-dashboard.png)
+
+| Leader crashes: server 2 takes over, no data gap | Recovery + dead sensor detected |
+|---|---|
+| ![Failover](docs/screenshots/03-failover.png) | ![Recovery](docs/screenshots/04-recovery-sensor-offline.png) |
+
+Full write-up with all figures, demo guide and design rationale: [docs/REPORT.md](docs/REPORT.md)
+
 ## Architecture
+
+![Architecture](docs/screenshots/00-architecture.png)
 
 ```
   Sensor nodes (6 Pune stations)                         Dashboards (browser / phone)
@@ -87,8 +97,8 @@ event such as a garbage fire; the station turns *Poor* and an alert appears.
 .venv/bin/python -m unittest -v test_monitor
 ```
 
-Unit tests: CPCB AQI values, duplicate dropping, alert raise/clear, sensor-offline detection,
-and input validation. The end-to-end test starts a real 3-server cluster, kills the leader
+Unit tests: CPCB AQI values, duplicate dropping (including rebooted sensors), alert raise/clear,
+sensor-offline detection, and input validation. The end-to-end test starts a real 3-server cluster, kills the leader
 mid-stream, re-sends already-acknowledged readings, and checks that every reading is counted
 exactly once.
 
@@ -109,4 +119,4 @@ exactly once.
   real hardware (e.g. an ESP32 with a PMS5003 sensor) would send the same messages.
 - AQI is computed on instantaneous readings; CPCB averages PM over 24 h and NO₂ over 24 h.
 - A network partition can briefly produce two leaders; Bully assumes crash failures.
-- Sensor buffers live in memory; a sensor that reboots loses its unsent readings.
+- Sensor buffers live in memory; a sensor that reboots loses readings it had not yet sent.

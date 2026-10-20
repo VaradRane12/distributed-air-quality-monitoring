@@ -38,6 +38,7 @@ class Sensor:
         self.servers = servers
         self.clock = 0      # Lamport clock
         self.seq = 0        # per-sensor sequence number, lets the server drop duplicates
+        self.boot = int(time.time() * 1000)  # new on every start, so a rebooted sensor's seq=1 is not a duplicate
         self.buffer = []    # readings not yet acknowledged
         self.event = 0      # remaining readings of a simulated pollution event
         self.phase = random.uniform(0, 2 * math.pi)
@@ -54,7 +55,7 @@ class Sensor:
         boost = 5.0 if self.event else 1.0
         self.event = max(0, self.event - 1)
         pm25 = max(0.0, self.base * daily * boost + random.gauss(0, self.base * 0.08))
-        return {"type": "reading", "station": self.sid, "name": self.name, "seq": self.seq, "ts": self.clock,
+        return {"type": "reading", "station": self.sid, "name": self.name, "boot": self.boot, "seq": self.seq, "ts": self.clock,
                 "pm25": round(pm25, 1),
                 "pm10": round(max(0.0, pm25 * 1.7 + random.gauss(0, 6)), 1),
                 "no2": round(max(0.0, self.base * 0.6 * daily + random.gauss(0, 4)), 1)}
