@@ -1,4 +1,4 @@
-# Pune Air Watch: Fault-Tolerant Distributed Air-Quality Monitoring Network
+# Fault-Tolerant Distributed Air-Quality Monitoring System using Bully Election and Lamport Clocks
 
 IoT air-quality sensors across Pune stream PM2.5, PM10 and NO₂ readings to a **cluster of
 monitoring servers**. The leader computes the official **CPCB National AQI**, raises health
