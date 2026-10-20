@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pune Air Watch</title>
+<style>
+  :root { --bg:#0f1419; --panel:#1a2129; --line:#2a333d; --text:#e6e6e6; --muted:#8b98a5; --ok:#3cb44b; --down:#e6194b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:8px 24px; align-items:baseline; padding:16px 20px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0; font-size:20px; } .muted { color:var(--muted); }
+  main { display:grid; grid-template-columns:1fr 320px; gap:16px; padding:16px 20px; }
+  @media (max-width: 900px) { main { grid-template-columns:1fr; } }
+  #stations { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:12px; align-content:start; }
+  .card, section { background:var(--panel); border-radius:10px; padding:14px; }
+  .card { border-top:5px solid var(--c, #555); position:relative; }
+  .card.offline { opacity:.55; }
+  .card h3 { margin:0 0 6px; font-size:15px; }
+  .aqi { font-size:40px; font-weight:700; line-height:1; color:var(--c); }
+  .cat { display:inline-block; margin-left:8px; padding:2px 8px; border-radius:99px; font-size:12px; font-weight:600; background:var(--c); color:#111; vertical-align:middle; }
+  .vals { display:flex; gap:12px; margin:8px 0; font-size:12px; color:var(--muted); } .vals b { color:var(--text); }
+  .badge { position:absolute; top:12px; right:12px; font-size:11px; font-weight:700; padding:2px 6px; border-radius:4px; background:var(--down); color:#fff; }
+  canvas { width:100%; height:48px; display:block; }
+  aside { display:flex; flex-direction:column; gap:12px; }
+  h2 { font-size:12px; margin:0 0 8px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  ul { list-style:none; margin:0; padding:0; } li { padding:3px 0; }
+  .row { display:flex; justify-content:space-between; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; }
+  #alerts { max-height:360px; overflow:auto; } #alerts li { border-left:3px solid var(--l); padding:4px 8px; margin-bottom:6px; background:#0f141988; font-size:13px; }
+  #alerts small { color:var(--muted); display:block; }
+  .legend li { display:flex; align-items:center; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pune Air Watch</h1>
+  <span class="muted">Fault-tolerant distributed air-quality monitoring · CPCB National AQI</span>
+  <span id="conn" class="muted">connecting…</span>
+</header>
+<main>
+  <div id="stations"></div>
+  <aside>
+    <section><h2>Health alerts</h2><ul id="alerts"><li class="muted" style="--l:transparent">No alerts yet</li></ul></section>
+    <section><h2>Monitoring cluster</h2><ul id="servers"></ul><p id="stats" class="muted" style="margin:8px 0 0"></p></section>
+    <section><h2>AQI scale (CPCB)</h2><ul class="legend" id="legend"></ul></section>
+  </aside>
+</main>
+<script>
+const CATS = [[50,"Good","#00b050"],[100,"Satisfactory","#92d050"],[200,"Moderate","#ffd700"],[300,"Poor","#ff9900"],[400,"Very Poor","#ff3b30"],[500,"Severe","#c00000"]];
+const color = a => (CATS.find(c => a <= c[0]) || CATS[5])[2];
+const LEVEL = {alert:"#ff9900", clear:"#00b050", warn:"#e6194b", info:"#4363d8"};
+const esc = t => String(t).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+document.getElementById("legend").innerHTML = CATS.map(([top, name, c], i) =>
+  `<li><span class="dot" style="background:${c}"></span>${name}<span class="muted" style="margin-left:auto">${i ? CATS[i-1][0] + 1 : 0}–${top}</span></li>`).join("");
+
+let servers = {}, ws = null, hint = null, rr = 0, clock = 0;
+const status = t => document.getElementById("conn").textContent = t;
+function addr(a) {  // config uses loopback; other devices must use the host they loaded the page from
+  const [host, port] = a.split(":");
+  return ["127.0.0.1", "localhost", "0.0.0.0"].includes(host) ? `${location.hostname}:${port}` : a;
+}
+
+function connect() {
+  const ids = Object.keys(servers);
+  const id = hint && servers[hint] ? hint : ids[rr++ % ids.length];
+  hint = null;
+  status(`trying server ${id}…`);
+  const sock = ws = new WebSocket(`ws://${addr(servers[id])}/live`);
+  sock.onopen = () => sock.send(JSON.stringify({type: "watch", ts: ++clock}));
+  sock.onmessage = e => {
+    const m = JSON.parse(e.data);
+    clock = Math.max(clock, m.ts || 0) + 1;  // Lamport receive rule
+    if (m.type === "redirect") { hint = m.leader && String(m.leader); sock.close(); }
+    else if (m.type === "state") render(m);
+  };
+  sock.onclose = () => {
+    if (ws !== sock) return;
+    status(hint ? `redirected to leader ${hint}…` : "server lost, failing over…");
+    setTimeout(connect, hint ? 50 : 300);
+  };
+}
+
+function spark(canvas, hist) {
+  const dpr = devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr);
+  const max = Math.max(150, ...hist), step = w / Math.max(1, hist.length - 1);
+  ctx.strokeStyle = "#ff990055"; ctx.setLineDash([3, 3]); ctx.beginPath();
+  ctx.moveTo(0, h - 200 / max * h); ctx.lineTo(w, h - 200 / max * h); ctx.stroke(); ctx.setLineDash([]);
+  ctx.lineWidth = 2; ctx.strokeStyle = color(hist[hist.length - 1] || 0); ctx.beginPath();
+  hist.forEach((a, i) => i ? ctx.lineTo(i * step, h - a / max * h) : ctx.moveTo(0, h - a / max * h));
+  ctx.stroke();
+}
+
+function render(m) {
+  const st = m.state, box = document.getElementById("stations");
+  status(`connected to server ${m.leader} (leader) · Lamport ${clock}`);
+  for (const [id, s] of Object.entries(st.stations).sort((a, b) => b[1].aqi - a[1].aqi)) {
+    let card = document.getElementById("st-" + id);
+    if (!card) {
+      card = document.createElement("div"); card.className = "card"; card.id = "st-" + id;
+      card.innerHTML = `<h3></h3><div><span class="aqi"></span><span class="cat"></span></div><div class="vals"></div><canvas aria-label="AQI trend"></canvas>`;
+    }
+    box.appendChild(card);  // re-append keeps cards sorted worst-first
+    card.style.setProperty("--c", color(s.aqi));
+    card.classList.toggle("offline", s.offline);
+    card.querySelector("h3").textContent = s.name;
+    card.querySelector(".aqi").textContent = s.aqi;
+    card.querySelector(".cat").textContent = s.category;
+    card.querySelector(".vals").innerHTML = `<span>PM2.5 <b>${s.pm25}</b></span><span>PM10 <b>${s.pm10}</b></span><span>NO₂ <b>${s.no2}</b></span>`;
+    let badge = card.querySelector(".badge");
+    if (s.offline && !badge) card.insertAdjacentHTML("beforeend", `<span class="badge">SENSOR OFFLINE</span>`);
+    if (!s.offline && badge) badge.remove();
+    spark(card.querySelector("canvas"), s.history);
+  }
+  if (st.alerts.length) document.getElementById("alerts").innerHTML = st.alerts.map(a =>
+    `<li style="--l:${LEVEL[a.level]}">${esc(a.msg)}<small>${new Date(a.time * 1000).toLocaleTimeString()} · Lamport ${a.ts}</small></li>`).join("");
+  document.getElementById("servers").innerHTML = Object.entries(m.servers).map(([id, up]) =>
+    `<li class="row"><span><span class="dot" style="background:var(--${up ? "ok" : "down"})"></span>server ${id}</span>
+     <span class="muted">${!up ? "DOWN" : id == m.leader ? "★ leader" : "backup (replica)"}</span></li>`).join("");
+  const online = Object.values(st.stations).filter(s => !s.offline).length;
+  document.getElementById("stats").textContent =
+    `${st.readings} readings ingested · ${online}/${Object.keys(st.stations).length} sensors online · replica v${st.version}`;
+}
+
+(async () => {
+  servers = await (await fetch("/servers")).json();
+  hint = location.port && Object.keys(servers).find(id => servers[id].endsWith(":" + location.port));
+  connect();
+})();
+</script>
+</body>
+</html>

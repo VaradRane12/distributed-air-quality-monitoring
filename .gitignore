@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+graphify-out/
+.claude/
+logs/
+CLAUDE.md
+Semester-7-Syllabus.pdf
